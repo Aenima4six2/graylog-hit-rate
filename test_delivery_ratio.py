@@ -1,4 +1,6 @@
 #!/usr/bin/python3.6
+import calendar
+
 import requests
 import argparse
 import datetime
@@ -116,14 +118,17 @@ class GraylogTest:
         with self.lock:
             self.created_count += 1
             return {
-                'id': str(uuid.uuid4()),
-                'group_id': self.group_id,
-                'sequence': self.created_count,
-                'datetime': str(datetime.datetime.now()),
+                'version': '1.1',
+                'host': 'example.org',
                 'short_message': 'this is the short message',
                 'full_message': 'Backtrace here\n\nmore stuff',
+                'timestamp': calendar.timegm(time.gmtime()),
                 'level': 1,
-                'host': 'example.org'
+                '_datetime': str(datetime.datetime.now()),
+                '_message_id': str(uuid.uuid4()),
+                '_group_id': self.group_id,
+                '_sequence': self.created_count
+
             }
 
     def __throttle(self, suspend_ms):
@@ -135,7 +140,7 @@ class GraylogTest:
         for x in range(send_count):
             start = time.time()
             message = self.__create_message()
-            req_id = message["id"]
+            req_id = message['_message_id']
             host = self.options.host
             port = self.options.log_send_port
             json_message = json.dumps(message)
@@ -169,7 +174,7 @@ class GraylogTest:
         for x in range(send_count):
             start = time.time()
             message = self.__create_message()
-            req_id = message["id"]
+            req_id = message['_message_id']
             host = self.options.host
             port = self.options.log_send_port
             json_message = json.dumps(message)

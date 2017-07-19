@@ -1,5 +1,5 @@
 # graylog-delivery-ratio
-Send lots of GELF messages to Graylog and get the receive success rate.
+Send lots of GELF messages to Graylog and get the success/fail delivery ratio.
 
 ~~~~ 
 usage: test_delivery_ratio.py [-h] [-H HOST] [-l LOG_SEND_PORT] [-r THROTTLE]

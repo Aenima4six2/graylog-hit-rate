@@ -40,10 +40,9 @@ class GraylogTest:
         return self.sent_count / self.options.total_requests
 
     # Slam Graylog with some data and validate all requests
-    def run(self, use_udp=False):
+    def run(self, mode):
         self.reset()
-        sender = self.__send_udp if use_udp else self.__send_tcp
-        mode_text = "UDP" if use_udp else "TCP"
+        sender, mode_text = self.__get_test_runner(mode)
         total_requests = self.options.total_requests
 
         # Send requests
@@ -71,7 +70,7 @@ class GraylogTest:
 
         duration = (time.time() - self.start_time)
         mps = trunc(total_requests / duration)
-        print(f'{ts()} Sent [{total_requests}] requests with {mode_text} in [{duration}] sec ({mps} msg/s)')
+        print(f'{ts()} Sent [{self.sent_count}] requests with {mode_text} in [{duration}] sec ({mps} msg/s)')
 
         # Wait for flush
         print(f'{ts()} Waiting for Graylog to flush logs...')
@@ -80,6 +79,16 @@ class GraylogTest:
         # Validate result
         self.__validate()
         self.end_time = time.time()
+
+    def __get_test_runner(self, mode):
+        if mode == 'UDP':
+            return self.__send_udp, 'UDP'
+        elif mode == 'TCP':
+            return self.__send_tcp, 'TCP'
+        elif mode == 'HTTP':
+            return self.__send_http, 'HTTP'
+        else:
+            raise Exception(f'Unsupported mode {mode}')
 
     def __validate(self):
         total_requests = self.options.total_requests
@@ -93,9 +102,7 @@ class GraylogTest:
 
         headers = {'Accept': 'application/json'}
         res = requests.get(search_url, auth=api_auth, verify=False, headers=headers)
-        if res.status_code != 200:
-            print(f'{ts()} Request failed -> status - {res.status_code}:{res.text}')
-            return
+        res.raise_for_status()
 
         data = res.text
         response_json = json.loads(data)
@@ -135,6 +142,43 @@ class GraylogTest:
         if self.options.verbosity >= 2:
             print(f'{ts()} Throttled TCP send for {suspend_ms}')
         time.sleep(suspend_ms / 1000)
+
+    def __send_http(self, send_count):
+        for x in range(send_count):
+            start = time.time()
+            message = self.__create_message()
+            req_id = message['_message_id']
+            host = self.options.host
+            port = self.options.log_send_port
+            proto = self.options.protocol
+            url = f'{proto}://{host}:{port}/gelf'
+            json_message = json.dumps(message)
+            headers = {'Connection': 'keep-alive'}
+
+            try:
+                res = requests.post(url, verify=False, headers=headers, data=json_message)
+                res.raise_for_status()
+                duration = time.time() - start
+
+                if self.options.throttle > 0 and duration < self.options.throttle:
+                    self.__throttle(self.options.throttle - duration)
+
+                if self.options.verbosity >= 2:
+                    mps = 1 / duration
+                    print(f'{ts()} Test {self.group_id} - Sent HTTP message {req_id} -> '
+                          f'{host}:{port} in [{duration}] sec ({mps} msg/s)')
+
+                with self.lock:
+                    self.sent_count += 1
+                    if self.sent_count % (self.options.total_requests * .01) == 0:
+                        mps = trunc(self.sent_count / (time.time() - self.start_time))
+                        progress = trunc(self.sent_count / self.options.total_requests * 100)
+                        print(f'{ts()} HTTP Send progress: {progress}%  ({mps} msg/s)')
+
+            except Exception as ex:
+                print(f'{ts()} Error - HTTP Request {req_id} failed -> {ex}')
+                with self.lock:
+                    self.failed_count += 1
 
     def __send_udp(self, send_count):
         for x in range(send_count):
@@ -236,7 +280,7 @@ parser.add_argument("-t", "--total_requests", type=int, default=1000,
 parser.add_argument("-T", "--threads", type=int, default=1,
                     help="The total number of send threads to run")
 
-parser.add_argument("-m", "--mode", nargs='+', choices=['UDP', 'TCP'], default=['UDP', 'TCP'],
+parser.add_argument("-m", "--mode", nargs='+', choices=['UDP', 'TCP', 'HTTP'], default=['UDP', 'TCP'],
                     help='Specifies the send mode (TCP or UDP or BOTH)')
 
 parser.add_argument("-v", "--verbosity", action="count", default=0,
@@ -256,11 +300,13 @@ if args.verbosity >= 1:
 
 # Print stats
 test = GraylogTest(args)
-if "UDP" in args.mode:
-    test.run(use_udp=True)
+if 'UDP' in args.mode:
+    test.run('UDP')
 
-time.sleep(5)
-if "TCP" in args.mode:
-    test.run(use_udp=False)
+if 'TCP' in args.mode:
+    test.run('TCP')
+
+if 'HTTP' in args.mode:
+    test.run('HTTP')
 
 print(f'{ts()} Test completed in [{test.end_time - test.start_time}] sec')

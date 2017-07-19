@@ -125,8 +125,8 @@ vcs.xml
 # CMake
 cmake-build-debug/
 
-# Mongo Explorer plugin:
-.idea/**/mongoSettings.xml
+# Idea
+.idea/
 
 ## File-based project format:
 *.iws

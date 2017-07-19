@@ -251,7 +251,8 @@ class GraylogTest:
                     self.failed_count += 1
 
 
-parser = argparse.ArgumentParser(description='Test Graylog UDP and TCP.')
+parser = argparse.ArgumentParser(
+    description='Send lots of GELF messages to Graylog and get the success/fail delivery ratio.')
 
 parser.add_argument("-H", "--host", type=str, default="localhost",
                     help="The Graylog hostname")

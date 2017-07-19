@@ -5,9 +5,9 @@ Send lots of GELF messages to Graylog and get the success/fail delivery ratio.
 usage: test_delivery_ratio.py [-h] [-H HOST] [-l LOG_SEND_PORT] [-r THROTTLE]
                               [-a API_PORT] [-P {http,https}] [-u USERNAME]
                               [-p PASSWORD] [-t TOTAL_REQUESTS] [-T THREADS]
-                              [-m {UDP,TCP} [{UDP,TCP} ...]] [-v]
+                              [-m {UDP,TCP,HTTP} [{UDP,TCP,HTTP} ...]] [-v]
 
-Test Graylog UDP and TCP.
+Send lots of GELF messages to Graylog and get the success/fail delivery ratio.
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -29,7 +29,7 @@ optional arguments:
                         The total number of test requests to send to Graylog
   -T THREADS, --threads THREADS
                         The total number of send threads to run
-  -m {UDP,TCP} [{UDP,TCP} ...], --mode {UDP,TCP} [{UDP,TCP} ...]
+  -m {UDP,TCP,HTTP} [{UDP,TCP,HTTP} ...], --mode {UDP,TCP,HTTP} [{UDP,TCP,HTTP} ...]
                         Specifies the send mode (TCP or UDP or BOTH)
   -v, --verbosity       Application output verbosity
   ~~~~ 

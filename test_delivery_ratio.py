@@ -3,7 +3,6 @@ import argparse
 import calendar
 import datetime
 import json
-import requests
 import socket
 import threading
 import time
@@ -11,6 +10,8 @@ import uuid
 from math import trunc
 from pprint import pprint
 from urllib.parse import urlencode, quote_plus
+
+import requests
 
 
 def ts():
@@ -100,7 +101,7 @@ class GraylogTest:
             print(f'{ts()} Validating sent data -> {search_url}')
 
         headers = {'Accept': 'application/json'}
-        res = requests.get(search_url, auth=api_auth, verify=False, headers=headers)
+        res = requests.get(search_url, auth=api_auth, verify=False, headers=headers, timeout=10)
         res.raise_for_status()
 
         data = res.text
@@ -149,7 +150,7 @@ class GraylogTest:
             port = self.options.log_send_port
             proto = self.options.protocol
             url = f'{proto}://{host}:{port}/gelf'
-            res = requests.post(url, verify=False, headers=headers, data=json_message)
+            res = requests.post(url, verify=False, headers=headers, data=json_message, timeout=10)
             res.raise_for_status()
 
         self.__try_send(send_count, 'HTTP', lambda json_message: send(json_message))

@@ -1,10 +1,9 @@
 #!/usr/bin/python3.6
-import calendar
-
-import requests
 import argparse
+import calendar
 import datetime
 import json
+import requests
 import socket
 import threading
 import time

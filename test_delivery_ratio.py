@@ -144,90 +144,43 @@ class GraylogTest:
         time.sleep(suspend_ms / 1000)
 
     def __send_http(self, send_count):
-        for x in range(send_count):
-            start = time.time()
-            message = self.__create_message()
-            req_id = message['_message_id']
+        def send(json_message):
+            headers = {'Connection': 'keep-alive'}
             host = self.options.host
             port = self.options.log_send_port
             proto = self.options.protocol
             url = f'{proto}://{host}:{port}/gelf'
-            json_message = json.dumps(message)
-            headers = {'Connection': 'keep-alive'}
+            res = requests.post(url, verify=False, headers=headers, data=json_message)
+            res.raise_for_status()
 
-            try:
-                res = requests.post(url, verify=False, headers=headers, data=json_message)
-                res.raise_for_status()
-                duration = time.time() - start
-
-                if self.options.throttle > 0 and duration < self.options.throttle:
-                    self.__throttle(self.options.throttle - duration)
-
-                if self.options.verbosity >= 2:
-                    mps = 1 / duration
-                    print(f'{ts()} Test {self.group_id} - Sent HTTP message {req_id} -> '
-                          f'{host}:{port} in [{duration}] sec ({mps} msg/s)')
-
-                with self.lock:
-                    self.sent_count += 1
-                    if self.sent_count % (self.options.total_requests * .01) == 0:
-                        mps = trunc(self.sent_count / (time.time() - self.start_time))
-                        progress = trunc(self.sent_count / self.options.total_requests * 100)
-                        print(f'{ts()} HTTP Send progress: {progress}%  ({mps} msg/s)')
-
-            except Exception as ex:
-                print(f'{ts()} Error - HTTP Request {req_id} failed -> {ex}')
-                with self.lock:
-                    self.failed_count += 1
+        self.__try_send(send_count, 'HTTP', lambda json_message: send(json_message))
 
     def __send_udp(self, send_count):
-        for x in range(send_count):
-            start = time.time()
-            message = self.__create_message()
-            req_id = message['_message_id']
-            host = self.options.host
-            port = self.options.log_send_port
-            json_message = json.dumps(message)
+        def send(json_message):
             json_bytes = bytes(json_message, 'utf-8')
-            try:
-                udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                udp_sock.sendto(json_bytes, (host, port))
-                duration = time.time() - start
+            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_sock.sendto(json_bytes, (self.options.host, self.options.log_send_port))
 
-                if self.options.throttle > 0 and duration < self.options.throttle:
-                    self.__throttle(self.options.throttle - duration)
-
-                if self.options.verbosity >= 2:
-                    mps = 1 / duration
-                    print(f'{ts()} Test {self.group_id} - Sent UDP message {req_id} -> '
-                          f'{host}:{port} in [{duration}] sec ({mps} msg/s)')
-
-                with self.lock:
-                    self.sent_count += 1
-                    if self.sent_count % (self.options.total_requests * .01) == 0:
-                        mps = trunc(self.sent_count / (time.time() - self.start_time))
-                        progress = trunc(self.sent_count / self.options.total_requests * 100)
-                        print(f'{ts()} UDP Send progress: {progress}%  ({mps} msg/s)')
-
-            except Exception as ex:
-                print(f'{ts()} Error - UDP Request {req_id} failed -> {ex}')
-                with self.lock:
-                    self.failed_count += 1
+        self.__try_send(send_count, 'UDP', lambda json_message: send(json_message))
 
     def __send_tcp(self, send_count):
-        for x in range(send_count):
-            start = time.time()
-            message = self.__create_message()
-            req_id = message['_message_id']
-            host = self.options.host
-            port = self.options.log_send_port
-            json_message = json.dumps(message)
+        def send(json_message):
             json_bytes = json_message.encode('utf-8') + b'\x00'
+            tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_sock.connect((self.options.host, self.options.log_send_port))
+            tcp_sock.sendall(json_bytes)
+            tcp_sock.close()
+
+        self.__try_send(send_count, 'TCP', lambda json_message: send(json_message))
+
+    def __try_send(self, send_count, sender_name, sender):
+        message = self.__create_message()
+        req_id = message['_message_id']
+        json_message = json.dumps(message)
+        start = time.time()
+        for _ in range(send_count):
             try:
-                tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                tcp_sock.connect((host, port))
-                tcp_sock.sendall(json_bytes)
-                tcp_sock.close()
+                sender(json_message)
                 duration = time.time() - start
 
                 if self.options.throttle > 0 and duration < self.options.throttle:
@@ -235,7 +188,9 @@ class GraylogTest:
 
                 if self.options.verbosity >= 2:
                     mps = 1 / duration
-                    print(f'{ts()} Test {self.group_id} - Sent TCP message {req_id} -> '
+                    host = self.options.host
+                    port = self.options.log_send_port
+                    print(f'{ts()} Test {self.group_id} - Sent {sender_name} message {req_id} -> '
                           f'{host}:{port} in [{duration}] sec ({mps} msg/s)')
 
                 with self.lock:
@@ -243,10 +198,11 @@ class GraylogTest:
                     if self.sent_count % (self.options.total_requests * .01) == 0:
                         mps = trunc(self.sent_count / (time.time() - self.start_time))
                         progress = trunc(self.sent_count / self.options.total_requests * 100)
-                        print(f'{ts()} TCP Send progress: {progress}% ({mps} msg/s)')
+                        print(f'{ts()} {sender_name} Send progress: {progress}% ({mps} msg/s) - '
+                              f'[{self.sent_count}] sent - [{duration}] sec')
 
             except Exception as ex:
-                print(f'{ts()} Error - TCP Request {req_id} failed -> {ex}')
+                print(f'{ts()} Error - {sender_name} Request {req_id} failed -> {ex}')
                 with self.lock:
                     self.failed_count += 1
 

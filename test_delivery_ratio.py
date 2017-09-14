@@ -73,9 +73,12 @@ class GraylogTest:
         mps = trunc(total_requests / duration)
         print(f'{ts()} Sent [{self.sent_count}] requests with {mode} in [{duration}] sec ({mps} msg/s)')
 
+        while self.__still_processing():
+            time.sleep(2)
+
         # Wait for flush
-        print(f'{ts()} Waiting for Graylog to flush logs...')
-        time.sleep(10)
+        print(f'{ts()} Waiting for another {self.options.es_refresh_interval + 5}s for the index refresh...')
+        time.sleep(self.options.es_refresh_interval + 5)
 
         # Validate result
         self.__validate()
@@ -90,6 +93,38 @@ class GraylogTest:
             return self.__send_http, 'HTTP'
         else:
             raise Exception(f'Unsupported mode {mode}')
+
+    def __get_json(self, path):
+        headers = {'Accept': 'application/json'}
+        port = self.options.api_port
+        host = self.options.host
+        proto = self.options.protocol
+        search_url = f'{proto}://{host}:{port}/api/{path}'
+
+        res = requests.get(search_url, auth=api_auth, verify=False, headers=headers, timeout=10)
+        res.raise_for_status()
+
+        return json.loads(res.text)
+
+    def __journal_size(self):
+        response_json = self.__get_json('system/metrics/org.graylog2.journal.entries-uncommitted')
+
+        return response_json['value']
+
+    def __output_throughput(self):
+        response_json = self.__get_json('system/metrics/org.graylog2.throughput.output.1-sec-rate')
+
+        return response_json['value']
+
+    def __still_processing(self):
+        journal_size = self.__journal_size()
+        output_throughput = self.__output_throughput()
+
+        if journal_size > 0 and output_throughput > 0:
+            print(f'{ts()} Progress: journal-size={journal_size} output-throughput={output_throughput}')
+            return True
+        else:
+            return False
 
     def __validate(self):
         total_requests = self.options.total_requests
@@ -223,6 +258,9 @@ parser.add_argument("-l", "--log_send_port", type=int, default=12201,
 
 parser.add_argument("-r", "--throttle", type=float, default=0,
                     help="Throttle the minimum time between requests in milliseconds")
+
+parser.add_argument("-R", "--es_refresh_interval", type=int, default=15,
+                    help="The ES index refresh interval. (the time it takes that messages become searchable)")
 
 parser.add_argument("-a", "--api_port", type=int, default=9000,
                     help="The Graylog REST API port")

@@ -42,13 +42,13 @@ class GraylogTest:
     # Slam Graylog with some data and validate all requests
     def run(self, mode):
         self.reset()
-        sender, mode_text = self.__get_test_runner(mode)
         total_requests = self.options.total_requests
 
         # Send requests
-        print(f'{ts()} Sending {total_requests} requests with {mode_text} for group {self.group_id}')
+        print(f'{ts()} Sending {total_requests} requests with {mode} for group {self.group_id}')
         if self.options.threads <= 1:
             print(f'{ts()} Sending in single threaded mode')
+            sender, mode_text = self.__get_test_runner(mode)
             sender(total_requests)
         else:
             print(f'{ts()} Sending in multi threaded mode with {self.options.threads} threads')
@@ -59,6 +59,7 @@ class GraylogTest:
                 for x in range(self.options.threads):
                     remain = total_requests - skip
                     take = batch_size if batch_size <= remain else remain
+                    sender, mode_text = self.__get_test_runner(mode)
                     thread = threading.Thread(target=sender, args=(take,))
                     threads.append(thread)
                     skip += take
@@ -70,11 +71,14 @@ class GraylogTest:
 
         duration = (time.time() - self.start_time)
         mps = trunc(total_requests / duration)
-        print(f'{ts()} Sent [{self.sent_count}] requests with {mode_text} in [{duration}] sec ({mps} msg/s)')
+        print(f'{ts()} Sent [{self.sent_count}] requests with {mode} in [{duration}] sec ({mps} msg/s)')
+
+        while self.__still_processing():
+            time.sleep(2)
 
         # Wait for flush
-        print(f'{ts()} Waiting for Graylog to flush logs...')
-        time.sleep(10)
+        print(f'{ts()} Waiting for another {self.options.es_refresh_interval + 5}s for the index refresh...')
+        time.sleep(self.options.es_refresh_interval + 5)
 
         # Validate result
         self.__validate()
@@ -89,6 +93,38 @@ class GraylogTest:
             return self.__send_http, 'HTTP'
         else:
             raise Exception(f'Unsupported mode {mode}')
+
+    def __get_json(self, path):
+        headers = {'Accept': 'application/json'}
+        port = self.options.api_port
+        host = self.options.host
+        proto = self.options.protocol
+        search_url = f'{proto}://{host}:{port}/api/{path}'
+
+        res = requests.get(search_url, auth=api_auth, verify=False, headers=headers, timeout=10)
+        res.raise_for_status()
+
+        return json.loads(res.text)
+
+    def __journal_size(self):
+        response_json = self.__get_json('system/metrics/org.graylog2.journal.entries-uncommitted')
+
+        return response_json['value']
+
+    def __output_throughput(self):
+        response_json = self.__get_json('system/metrics/org.graylog2.throughput.output.1-sec-rate')
+
+        return response_json['value']
+
+    def __still_processing(self):
+        journal_size = self.__journal_size()
+        output_throughput = self.__output_throughput()
+
+        if journal_size > 0 and output_throughput > 0:
+            print(f'{ts()} Progress: journal-size={journal_size} output-throughput={output_throughput}')
+            return True
+        else:
+            return False
 
     def __validate(self):
         total_requests = self.options.total_requests
@@ -164,12 +200,16 @@ class GraylogTest:
         self.__try_send(send_count, 'UDP', lambda json_message: send(json_message))
 
     def __send_tcp(self, send_count):
+        # Reuse one connection for sending messages because using a new
+        # connection for every message will raise the following error:
+        #     [Errno 99] Cannot assign requested address
+        tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_sock.connect((self.options.host, self.options.log_send_port))
+
         def send(json_message):
             json_bytes = json_message.encode('utf-8') + b'\x00'
-            tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            tcp_sock.connect((self.options.host, self.options.log_send_port))
             tcp_sock.sendall(json_bytes)
-            tcp_sock.close()
 
         self.__try_send(send_count, 'TCP', lambda json_message: send(json_message))
 
@@ -218,6 +258,9 @@ parser.add_argument("-l", "--log_send_port", type=int, default=12201,
 
 parser.add_argument("-r", "--throttle", type=float, default=0,
                     help="Throttle the minimum time between requests in milliseconds")
+
+parser.add_argument("-R", "--es_refresh_interval", type=int, default=15,
+                    help="The ES index refresh interval. (the time it takes that messages become searchable)")
 
 parser.add_argument("-a", "--api_port", type=int, default=9000,
                     help="The Graylog REST API port")

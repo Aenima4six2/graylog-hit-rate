@@ -42,13 +42,13 @@ class GraylogTest:
     # Slam Graylog with some data and validate all requests
     def run(self, mode):
         self.reset()
-        sender, mode_text = self.__get_test_runner(mode)
         total_requests = self.options.total_requests
 
         # Send requests
-        print(f'{ts()} Sending {total_requests} requests with {mode_text} for group {self.group_id}')
+        print(f'{ts()} Sending {total_requests} requests with {mode} for group {self.group_id}')
         if self.options.threads <= 1:
             print(f'{ts()} Sending in single threaded mode')
+            sender, mode_text = self.__get_test_runner(mode)
             sender(total_requests)
         else:
             print(f'{ts()} Sending in multi threaded mode with {self.options.threads} threads')
@@ -59,6 +59,7 @@ class GraylogTest:
                 for x in range(self.options.threads):
                     remain = total_requests - skip
                     take = batch_size if batch_size <= remain else remain
+                    sender, mode_text = self.__get_test_runner(mode)
                     thread = threading.Thread(target=sender, args=(take,))
                     threads.append(thread)
                     skip += take
@@ -70,7 +71,7 @@ class GraylogTest:
 
         duration = (time.time() - self.start_time)
         mps = trunc(total_requests / duration)
-        print(f'{ts()} Sent [{self.sent_count}] requests with {mode_text} in [{duration}] sec ({mps} msg/s)')
+        print(f'{ts()} Sent [{self.sent_count}] requests with {mode} in [{duration}] sec ({mps} msg/s)')
 
         # Wait for flush
         print(f'{ts()} Waiting for Graylog to flush logs...')

@@ -164,12 +164,16 @@ class GraylogTest:
         self.__try_send(send_count, 'UDP', lambda json_message: send(json_message))
 
     def __send_tcp(self, send_count):
+        # Reuse one connection for sending messages because using a new
+        # connection for every message will raise the following error:
+        #     [Errno 99] Cannot assign requested address
+        tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_sock.connect((self.options.host, self.options.log_send_port))
+
         def send(json_message):
             json_bytes = json_message.encode('utf-8') + b'\x00'
-            tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            tcp_sock.connect((self.options.host, self.options.log_send_port))
             tcp_sock.sendall(json_bytes)
-            tcp_sock.close()
 
         self.__try_send(send_count, 'TCP', lambda json_message: send(json_message))
 
